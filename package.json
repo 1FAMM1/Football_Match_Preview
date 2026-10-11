@@ -1,0 +1,13 @@
+{
+  "name": "live-football",
+  "version": "0.1.0",
+  "description": "Probabilidades ao vivo de próxima equipa a marcar (Poisson + xG)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "UNLICENSED"
+}

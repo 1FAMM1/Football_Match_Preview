@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="pt-PT">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Próximo golo – probabilidades ao vivo</title>
+<style>
+  :root { --bg:#0f1419; --card:#1a222c; --text:#e6edf3; --muted:#8b98a5; --home:#3b82f6; --none:#64748b; --away:#f59e0b; --good:#22c55e; --bad:#ef4444; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, sans-serif; background:var(--bg); color:var(--text); padding:16px; max-width:760px; margin-inline:auto; }
+  h1 { font-size:1.2rem; margin:0 0 4px; }
+  .sub { color:var(--muted); font-size:.85rem; margin-bottom:16px; }
+  .banner { background:#3a2f12; border:1px solid #6b5416; color:#f3d98a; padding:8px 12px; border-radius:8px; font-size:.85rem; margin-bottom:12px; }
+  .card { background:var(--card); border-radius:12px; padding:16px; margin-bottom:16px; }
+  .league { color:var(--muted); font-size:.75rem; text-transform:uppercase; letter-spacing:.05em; }
+  .score { display:flex; justify-content:space-between; align-items:center; margin:8px 0 12px; font-size:1.05rem; }
+  .score b { font-size:1.6rem; }
+  .min { color:var(--good); font-weight:600; }
+  .bar { display:flex; height:28px; border-radius:6px; overflow:hidden; font-size:.8rem; font-weight:600; }
+  .bar div { display:flex; align-items:center; justify-content:center; min-width:0; transition:width .5s; }
+  .b-home { background:var(--home); } .b-none { background:var(--none); } .b-away { background:var(--away); color:#111; }
+  .legend { display:flex; justify-content:space-between; color:var(--muted); font-size:.75rem; margin-top:4px; }
+  .stats { display:grid; grid-template-columns:1fr auto 1fr; gap:4px 12px; margin:12px 0; font-size:.85rem; }
+  .stats .l { text-align:right; } .stats .c { color:var(--muted); text-align:center; }
+  details { margin-top:8px; } summary { cursor:pointer; color:var(--muted); font-size:.85rem; }
+  .odds { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin:10px 0; }
+  .odds label { font-size:.75rem; color:var(--muted); display:block; margin-bottom:2px; }
+  .odds input { width:100%; padding:6px; border-radius:6px; border:1px solid #2d3948; background:#0f1419; color:var(--text); }
+  table { width:100%; border-collapse:collapse; font-size:.85rem; }
+  th, td { text-align:right; padding:4px 6px; } th:first-child, td:first-child { text-align:left; }
+  th { color:var(--muted); font-weight:500; }
+  .pos { color:var(--good); } .neg { color:var(--bad); }
+  .note { color:var(--muted); font-size:.75rem; margin-top:8px; }
+  .empty { color:var(--muted); text-align:center; padding:40px 0; }
+</style>
+</head>
+<body>
+<h1>Próxima equipa a marcar</h1>
+<div class="sub">Modelo de Poisson ajustado ao jogo ao vivo · atualiza automaticamente</div>
+<div id="banner"></div>
+<div id="list"><div class="empty">A carregar…</div></div>
+
+<script>
+const REFRESH_MS = 5000;
+const odds = {}; // id -> {h, n, a} (mantém o que escreveste entre atualizações)
+const pct = x => (x * 100).toFixed(1) + '%';
+const $ = (id) => document.getElementById(id);
+
+function cardHtml(m) {
+  const id = m.id;
+  return `
+  <div class="card" id="card-${id}">
+    <div class="league" id="lg-${id}"></div>
+    <div class="score"><span id="th-${id}"></span><span><b id="sc-${id}"></b> <span class="min" id="mn-${id}"></span></span><span id="ta-${id}"></span></div>
+    <div class="bar"><div class="b-home" id="bh-${id}"></div><div class="b-none" id="bn-${id}"></div><div class="b-away" id="ba-${id}"></div></div>
+    <div class="legend"><span>Casa marca a seguir</span><span>Sem mais golos</span><span>Fora marca a seguir</span></div>
+    <div class="stats" id="st-${id}"></div>
+    <details>
+      <summary>Comparar com cotações (mercado "Próximo golo")</summary>
+      <div class="odds">
+        <div><label>Casa</label><input type="number" step="0.01" min="1" id="oh-${id}"></div>
+        <div><label>Nenhum golo</label><input type="number" step="0.01" min="1" id="on-${id}"></div>
+        <div><label>Fora</label><input type="number" step="0.01" min="1" id="oa-${id}"></div>
+      </div>
+      <table id="cmp-${id}"></table>
+      <div class="note">Probabilidade implícita = 1/cotação, normalizada para retirar a margem. "Valor esperado" = prob. do modelo × cotação − 1. Um valor positivo só significa que o modelo discorda do mercado, não que o modelo esteja certo.</div>
+    </details>
+  </div>`;
+}
+
+function renderCompare(m) {
+  const id = m.id, o = odds[id] || {};
+  const rows = [['Casa', m.probs.home, o.h], ['Nenhum golo', m.probs.none, o.n], ['Fora', m.probs.away, o.a]];
+  if (rows.some(r => !(r[2] > 1))) { $('cmp-' + id).innerHTML = ''; return; }
+  const imp = rows.map(r => 1 / r[2]);
+  const sum = imp.reduce((a, b) => a + b, 0);
+  let html = `<tr><th></th><th>Modelo</th><th>Mercado</th><th>Valor esperado</th></tr>`;
+  rows.forEach((r, i) => {
+    const fair = imp[i] / sum, ev = r[1] * r[2] - 1;
+    html += `<tr><td>${r[0]}</td><td>${pct(r[1])}</td><td>${pct(fair)}</td><td class="${ev >= 0 ? 'pos' : 'neg'}">${(ev * 100).toFixed(1)}%</td></tr>`;
+  });
+  html += `<tr><td colspan="4" class="note">Margem da casa neste mercado: ${((sum - 1) * 100).toFixed(1)}%</td></tr>`;
+  $('cmp-' + id).innerHTML = html;
+}
+
+function update(m) {
+  const id = m.id, p = m.probs;
+  $('lg-' + id).textContent = m.league;
+  $('th-' + id).textContent = m.home;
+  $('ta-' + id).textContent = m.away;
+  $('sc-' + id).textContent = `${m.goals.home} - ${m.goals.away}`;
+  $('mn-' + id).textContent = `${m.minute}'`;
+  for (const [k, v] of [['bh', p.home], ['bn', p.none], ['ba', p.away]]) {
+    const el = $(k + '-' + id); el.style.width = (v * 100) + '%'; el.textContent = v > 0.08 ? pct(v) : '';
+  }
+  const row = (l, c, r) => `<div class="l">${l}</div><div class="c">${c}</div><div>${r}</div>`;
+  const xg = m.home.xg != null;
+  $('st-' + id).innerHTML =
+    row(m.home.shots, 'Remates', m.away.shots) +
+    row(m.home.shotsOn, 'À baliza', m.away.shotsOn) +
+    row(xg ? m.home.xg.toFixed(2) : '–', 'xG', xg ? m.away.xg.toFixed(2) : '–') +
+    row(m.home.reds, 'Vermelhos', m.away.reds) +
+    row((p.lambdaHome * 90).toFixed(2), 'Golos/90 (modelo)', (p.lambdaAway * 90).toFixed(2));
+  renderCompare(m);
+}
+
+function bindInputs(m) {
+  const id = m.id; odds[id] = odds[id] || {};
+  [['oh', 'h'], ['on', 'n'], ['oa', 'a']].forEach(([el, key]) => {
+    $(el + '-' + id).addEventListener('input', e => { odds[id][key] = parseFloat(e.target.value); renderCompare(window.__last[id]); });
+  });
+}
+
+async function tick() {
+  try {
+    const { demo, matches } = await (await fetch('/api/matches')).json();
+    $('banner').innerHTML = demo ? '<div class="banner">Modo demo: jogo simulado. Define API_FOOTBALL_KEY para ver jogos reais.</div>' : '';
+    const list = $('list');
+    if (!matches.length) { list.innerHTML = '<div class="empty">Sem jogos ao vivo neste momento.</div>'; return; }
+    if (list.querySelector('.empty')) list.innerHTML = '';
+    window.__last = window.__last || {};
+    const ids = new Set(matches.map(m => String(m.id)));
+    list.querySelectorAll('.card').forEach(c => { if (!ids.has(c.id.replace('card-', ''))) c.remove(); });
+    for (const m of matches) {
+      window.__last[m.id] = m;
+      if (!$('card-' + m.id)) { list.insertAdjacentHTML('beforeend', cardHtml(m)); bindInputs(m); }
+      update(m);
+    }
+  } catch (e) { console.error(e); }
+}
+tick(); setInterval(tick, REFRESH_MS);
+</script>
+</body>
+</html>
